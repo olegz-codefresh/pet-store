@@ -1,0 +1,27 @@
+version: "1.0"
+
+stages:
+  - "approval"
+  - "deployment"
+
+steps:
+
+  sync_and_wait:
+    title: Sync ArgoCD app and wait
+    type: argocd-sync
+    fail_false: false
+    stage: deployment
+    arguments:
+      context: argocd
+      app_name: artist
+      debug: true
+      wait_healthy: true
+      additional_flags: '--loglevel debug --timeout 50 --insecure'
+      additional_flags_for_wait_cmd: '--timeout 90'
+
+  send_slack_notification:
+    type: freestyle
+    image: alpine
+    stage: deployment
+    commands:
+      - echo "Send message to customer slack channel"

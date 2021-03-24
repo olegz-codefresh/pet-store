@@ -1,0 +1,92 @@
+version: "1.0"
+
+stages:
+  - clone
+  - build-application
+  - enrich-image
+  - manifests
+
+steps:
+  clone:
+    title: Cloning application repository
+    type: git-clone
+    repo: https://github.com/olegz-codefresh/${{CF_REPO_NAME}}
+    git: github
+    revision: ${{CF_BRANCH}}
+    stage: clone
+
+  test:
+    title: Execute unit tests
+    image: node:8
+    working_directory: ${{clone}}
+    stage: build-application
+    commands:
+      - yarn install
+      - yarn test
+
+  build:
+    title: Building Docker image
+    type: build
+    image_name: olehzahnitko/${{CF_REPO_NAME}}
+    working_directory: ${{clone}}
+    tag: ${{CF_REVISION}}
+    dockerfile: "Dockerfile"
+    stage: build-application
+    registry: dockerhub
+
+  push:
+    title: Push Docker image
+    type: push
+    stage: build-application
+    arguments:
+      candidate: ${{build}}
+      tag: ${{CF_REVISION}}
+      registry: dockerhub
+
+
+  enrich_image:
+    type: parallel
+    stage: enrich-image
+    steps:
+      extract_pr:
+        title: Extract pull requests and add it to docker image
+        type: image-enricher
+        stage: enrich-image
+        arguments:
+          IMAGE: 'docker.io/olehzahnitko/${{CF_REPO_NAME}}:${{CF_REVISION}}'
+          BRANCH: '${{CF_BRANCH}}'
+          REPO: 'olegz-codefresh/pet-store'
+          GIT_PROVIDER_NAME: github
+
+
+
+  clone_manifest_repo:
+    title: Cloning manifest repository
+    type: git-clone
+    repo: https://github.com/olegz-codefresh/pet-store-manifests
+    git: github
+    revision: master
+    stage: manifests
+
+  bump_version:
+    title: "Update version of image in deployment manifest"
+    image: "mikefarah/yq:3"
+    working_directory: "${{clone}}"
+    commands:
+      - cd /codefresh/volume/pet-store-manifests
+      - ls
+      - yq w -i /codefresh/volume/pet-store-manifests/resources-prod/deployment.yaml "spec.template.spec.containers[0].image" "docker.io/olehzahnitko/${{CF_REPO_NAME}}:${{CF_REVISION}}"
+      - cat /codefresh/volume/pet-store-manifests/resources-prod/deployment.yaml
+    stage: manifests
+
+  commit_and_push:
+    title: Commit changes and push manifest repo
+    type: git-commit
+    stage: manifests
+    arguments:
+      working_directory: "/codefresh/volume/pet-store-manifests"
+      repo: olegz-codefresh/pet-store-manifests
+      git: github
+      commit_message: Update image "docker.io/olehzahnitko/${{CF_REPO_NAME}}:${{CF_REVISION}}"
+      git_user_name: olegz-codefresh
+      git_user_email: olegz@codefresh.io
